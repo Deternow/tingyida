@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>听译答 · 语音转写 / 翻译 / 做题</title>
+<link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">听译答</div>
+  <div id="status" class="status" title="点击重新检测本地服务">检查服务…</div>
+</header>
+
+<div class="target" title="录制与翻译都会作用于这个标签页">
+  <span class="target-dot" id="targetDot"></span>
+  <span class="target-label">目标：</span>
+  <span class="target-name" id="targetTitle">检测中…</span>
+</div>
+
+<main>
+  <!-- ============ 音频识别 ============ -->
+  <section class="card">
+    <div class="card-title">音频识别<span class="hint">本地 Vosk 模型</span></div>
+
+    <div class="row">
+      <label class="lbl">音源</label>
+      <select id="source">
+        <option value="system">整个电脑的声音（推荐）</option>
+        <option value="tab">仅当前标签页的声音</option>
+        <option value="mic">麦克风</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label class="lbl">识别语言</label>
+      <select id="lang">
+        <option value="en" selected>英文</option>
+        <option value="zh">中文</option>
+      </select>
+    </div>
+
+    <div class="row"><span class="hint" id="sourceHint"></span></div>
+
+    <div class="row btns">
+      <button id="btnStart" class="btn primary">开始录制</button>
+      <button id="btnStop" class="btn" disabled>结束录制</button>
+    </div>
+
+    <div class="row meter-row">
+      <span id="timer" class="timer">00:00</span>
+      <div class="meter"><div id="meterBar" class="meter-bar"></div></div>
+      <span id="recState" class="rec-state">待机</span>
+    </div>
+
+    <div class="row btns">
+      <button id="btnTranscribe" class="btn">转成文字</button>
+      <label class="chk"><input type="checkbox" id="autoTranscribe" checked> 录完自动转写</label>
+    </div>
+    <div id="asrMsg" class="msg"></div>
+  </section>
+
+  <!-- ============ 网页翻译 ============ -->
+  <section class="card">
+    <div class="card-title">网页翻译<span class="hint">英文 → 中文，显示在原文下方</span></div>
+    <div class="row btns">
+      <button id="btnPageTranslate" class="btn primary">翻译本页英文</button>
+      <button id="btnPageClear" class="btn">清除译文</button>
+    </div>
+    <div id="pageMsg" class="msg"></div>
+    <div id="permHint" class="perm-hint" hidden>
+      <span id="permHintText"></span>
+      <button id="btnGrant" class="btn small">授权全站权限</button>
+    </div>
+  </section>
+
+  <!-- ============ 做题 ============ -->
+  <section class="card">
+    <div class="card-title">做题<span class="hint">页面文本 + 录音文本 → 中文解答</span></div>
+    <div class="row">
+      <label class="lbl">作答模型</label>
+      <select id="solveMode">
+        <option value="local">本地 Qwen（离线）</option>
+        <option value="cloud">云端 API（Key）</option>
+      </select>
+    </div>
+    <div class="row"><span class="hint" id="solveModeHint"></span></div>
+    <div class="row">
+      <label class="lbl">补充要求</label>
+      <input id="solveExtra" type="text" placeholder="可选，例如：只给答案 / 讲详细一点">
+    </div>
+    <div class="row btns">
+      <button id="btnSolve" class="btn primary">做题</button>
+      <button id="btnSolveCopy" class="btn">复制解答</button>
+    </div>
+    <div id="solveMsg" class="msg"></div>
+    <div id="solveAnswer" class="answer" hidden></div>
+  </section>
+
+  <!-- ============ 历史记录 ============ -->
+  <section class="card">
+    <div class="card-title">
+      历史记录 <span id="histCount" class="badge">0</span>
+      <span class="hint">音频存于 recordings/</span>
+    </div>
+    <div id="history" class="history"></div>
+  </section>
+
+  <!-- ============ 设置 ============ -->
+  <section class="card collapse">
+    <div class="card-title small">设置</div>
+    <div class="row">
+      <label class="lbl">本地服务</label>
+      <input id="apiBase" type="text" value="http://127.0.0.1:8765">
+    </div>
+    <div class="row"><span class="hint">本地/云端在「做题」卡片里切换；下面三项是云端 API 的配置。</span></div>
+    <div class="row">
+      <label class="lbl">API 地址</label>
+      <input id="cloudBaseUrl" type="text" placeholder="https://api.example.com/v1">
+    </div>
+    <div class="row">
+      <label class="lbl">模型名称</label>
+      <input id="cloudModel" type="text" placeholder="例如 gpt-4o-mini">
+    </div>
+    <div class="row">
+      <label class="lbl">API Key</label>
+      <input id="cloudApiKey" type="password" autocomplete="off" placeholder="留空则保留已保存密钥">
+    </div>
+    <div class="row">
+      <label class="chk"><input type="checkbox" id="cloudSendHtml"> 将当前网页完整 HTML 发给云端</label>
+    </div>
+    <div class="row"><span class="hint">做题只外发文字：页面可见文本（含中文）、录音识别文本，勾选后另附完整 HTML。录音 WAV 仅存本机，不会上传。API Key 保存在本机 data/cloud_config.json。</span></div>
+    <div class="row">
+      <button id="btnSaveCloud" class="btn small">保存云端配置</button>
+      <button id="btnSave" class="btn small">保存本地地址</button>
+      <button id="btnOpenRecordings" class="btn small">打开录音文件夹</button>
+    </div>
+    <div class="row">
+      <label class="chk"><input type="checkbox" id="fabVisible" checked> 在网页右侧显示悬浮图标</label>
+    </div>
+    <div class="row"><span class="hint" id="fabPages"></span></div>
+
+    <div class="row sep"><span class="lbl">网页注入能力</span></div>
+    <div class="row"><span class="hint" id="permState"></span></div>
+    <div class="row">
+      <label class="chk">
+        <input type="checkbox" id="cspBypass"> 绕过网站 CSP 限制
+        <span class="hint">（需先授权全站权限；生效后刷新网页）</span>
+      </label>
+    </div>
+    <div class="row">
+      <button id="btnGrant2" class="btn small">授权全站权限</button>
+      <button id="btnRevoke" class="btn small">撤销授权</button>
+    </div>
+    <div id="setMsg" class="msg"></div>
+  </section>
+</main>
+
+<script src="sidepanel.js"></script>
+</body>
+</html>

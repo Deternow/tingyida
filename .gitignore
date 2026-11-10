@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.py[cod]
+recordings/
+data/history.json
+data/cloud_config.json
+models/qwen/
+
+# 打包产物
+听译答服务.exe
+dist/
+dist_exe/
+dist_exe2/
+build_exe/
+build_exe2/
+build_out/
+build_tmp/
