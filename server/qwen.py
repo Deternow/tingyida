@@ -137,7 +137,7 @@ def local_model_status():
         return {
             "available": False,
             "model": None,
-            "reason": "models/qwen 里没有模型文件，下载可能未完成",
+            "reason": "models/qwen 为空：尚未下载本地做题模型，需要时运行 安装本地模型.bat",
         }
     if not _find_ollama_exe():
         return {
