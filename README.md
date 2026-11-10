@@ -29,8 +29,10 @@ Manifest V3 扩展，三种能力共用一套本地后端：录音交给本地 V
 
 ## 安装与运行
 
-> 想要开箱即用：到仓库的 **Releases** 下载 `TingYiDa-2.3.0.zip`（含免装 Python 的 `听译答服务.exe`）。
-> 仓库源码本身不含 exe 与模型权重，按下面的步骤自行构建也能跑。
+> 想要开箱即用：到 **Releases** 下载 `TingYiDa-2.3.0.zip`。压缩包已内置 `听译答服务.exe`（免装 Python）、
+> 英文/中文 Vosk 识别模型与 Argos 英译中模型，解压后双击 `启动本地服务.bat` 即可转写和翻译。
+> **只有本地做题的 Qwen 模型（6.6 GB）需要另行下载**（见第 4 节）。
+> 仓库源码本身不含 exe 与模型，按下面的步骤自行构建也能跑。
 
 ### 1. 启动后端服务（二选一）
 
@@ -67,7 +69,9 @@ python server\server.py
 
 ### 2. 准备语音识别和翻译模型
 
-模型放在项目根目录的 `models/` 下。若对应模型目录缺失：
+**用 Release 压缩包的话这一步可以跳过**：包内已带 `models/vosk/`（英/中）与 `models/en_zh/`，开箱即可转写和翻译。
+
+从源码运行或模型缺失时，模型放在项目根目录的 `models/` 下，执行：
 
 ```bat
 python server\install_asr_model.py
@@ -134,6 +138,16 @@ python server\install_translation_model.py
 不要把整个 `models/qwen/` 目录直接提交到普通 Git 仓库。它包含数 GB 模型文件，远超 GitHub 普通 Git 单文件 100 MiB 限制。仓库 `.gitignore` 已排除虚拟环境、缓存、录音、历史记录、云端 API 配置和 `models/qwen/`。若相关文件此前已被 Git 跟踪，仅添加忽略规则不会自动从版本库移除它们。
 
 发布前还应检查识别/翻译模型的上游许可，并为项目添加适用的开源许可证。公开代码不代表第三方模型权重也可不受限制地再分发。
+
+### 第三方模型与许可
+
+| 组件 | 来源 | 许可 |
+| --- | --- | --- |
+| Vosk 识别模型（`vosk-model-small-en-us-0.15`、`vosk-model-small-cn-0.22`） | [alphacephei.com/vosk](https://alphacephei.com/vosk/models) | Apache-2.0 |
+| Argos 英译中模型（`translate-en_zh-1_9`） | [Argos Translate](https://www.argosopentech.com/) / OPUS-MT | MIT（模型基于 OPUS-MT，遵循其 CC-BY-4.0 条款） |
+| Qwen3.5:9b（不随包分发） | [Ollama 模型库](https://ollama.com/library/qwen3.5) | Apache-2.0 |
+
+Release 压缩包内置前两项，仅作离线推理使用，未做任何修改；如需再分发请保留上述署名与许可信息。
 
 ## 目录结构
 
