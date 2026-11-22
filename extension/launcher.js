@@ -1,16 +1,16 @@
 /* 听译答 · 网页悬浮入口
  *
- * 常驻注入到每个页面：右侧一个悬浮球，点击弹出抽屉，
- * 抽屉里用 iframe 加载 sidepanel.html —— 也就是完整的插件界面。
+ * 交互参照会译那类插件：
+ *  - 右侧一个悬浮球，点开是「浮动工具卡」（不是整条侧边抽屉）；
+ *  - 工具卡可拖动、可收起，尺寸固定在 392px 左右，不占满屏；
+ *  - AI 解答单独一个可拖动窗口，和工具卡互相独立：收起工具卡、拖动任何一边都不影响另一边。
  *
- * 这样不依赖 Chrome 侧边栏是否固定，打开网页就能用。
- * 用 Shadow DOM 是为了不被任何网页样式污染，也不污染网页。
+ * 用 Shadow DOM 是为了不被网页样式污染，也不污染网页。
  */
 
 (function () {
   if (window.__tydLauncherInjected) return;
   window.__tydLauncherInjected = true;
-  console.log('[听译答] launcher injected on', location.href);
 
   const PANEL_URL = chrome.runtime.getURL('sidepanel.html');
 
@@ -32,7 +32,7 @@
       background: #185fa5;
       box-shadow: 0 2px 8px rgba(0,0,0,.28);
       cursor: pointer;
-      z-index: 2147483646;
+      z-index: 2147483645;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -41,62 +41,123 @@
     }
     .fab:hover { background: #0c447c; }
     .fab.hide { right: -60px; opacity: 0; pointer-events: none; }
+
+    /* ---------- 浮动工具卡 ---------- */
     .panel {
       position: fixed;
-      top: 0;
-      right: 0;
-      width: 400px;
-      max-width: 92vw;
-      height: 100%;
+      right: 64px;
+      top: 50%;
+      transform: translateY(-50%) scale(.97);
+      width: 392px;
+      height: min(620px, 86vh);
+      display: flex;
+      flex-direction: column;
       background: #fff;
-      box-shadow: -4px 0 18px rgba(0,0,0,.18);
-      transform: translateX(100%);
-      transition: transform .2s ease;
+      border: 1px solid rgba(15, 40, 70, .12);
+      border-radius: 14px;
+      box-shadow: 0 12px 34px rgba(12, 40, 70, .22);
+      overflow: hidden;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .16s ease, transform .16s ease;
       z-index: 2147483647;
+      font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
     }
-    .panel.open { transform: translateX(0); }
+    .panel.open { opacity: 1; pointer-events: auto; transform: translateY(-50%) scale(1); }
+    .panel.dragging, .answer.dragging { transition: none; }
+
+    .head {
+      height: 34px;
+      flex: 0 0 34px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 6px 0 10px;
+      background: #f4f8fd;
+      border-bottom: 1px solid #e4edf8;
+      cursor: move;
+      user-select: none;
+    }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: #378add; }
+    .name { font-weight: 600; color: #0c447c; font-size: 12.5px; }
+    .grow { flex: 1 1 auto; }
+    .ic {
+      width: 22px; height: 22px;
+      border: none; background: transparent;
+      color: #5b6b7d; border-radius: 6px;
+      cursor: pointer; font-size: 14px; line-height: 1;
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 0;
+    }
+    .ic:hover { background: #e2ecf9; color: #0c447c; }
+
     .panel iframe {
+      flex: 1 1 auto;
       width: 100%;
-      height: 100%;
       border: none;
       display: block;
       background: #fff;
     }
-    .close {
-      position: absolute;
-      left: -30px;
-      top: 12px;
-      width: 26px;
-      height: 26px;
-      border: none;
-      border-radius: 50%;
-      background: #185fa5;
-      color: #fff;
-      font-size: 15px;
-      line-height: 1;
-      cursor: pointer;
-      box-shadow: 0 2px 6px rgba(0,0,0,.25);
+
+    /* ---------- 独立解答窗口 ---------- */
+    .answer {
+      position: fixed;
+      width: 430px;
+      max-height: 74vh;
+      display: none;
+      flex-direction: column;
+      background: #fff;
+      border: 1px solid rgba(15, 40, 70, .12);
+      border-radius: 12px;
+      box-shadow: 0 14px 38px rgba(12, 40, 70, .24);
+      overflow: hidden;
+      z-index: 2147483646;
+      font: 13px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
     }
-    .close:hover { background: #0c447c; }
+    .answer.open { display: flex; }
+    .answer .body {
+      padding: 10px 12px 12px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: #1f2937;
+    }
+    .answer .meta {
+      flex: 0 0 auto;
+      padding: 0 12px 8px;
+      color: #7b8794;
+      font-size: 11.5px;
+    }
   `;
   shadow.appendChild(style);
 
+  /* ---------- 工具卡 ---------- */
   const panel = document.createElement('div');
   panel.className = 'panel';
-
-  const closeBtn = document.createElement('button');
-  closeBtn.className = 'close';
-  closeBtn.title = '收起';
-  closeBtn.textContent = '×';
-  closeBtn.onclick = () => toggle(false);
-  panel.appendChild(closeBtn);
+  panel.innerHTML =
+    '<div class="head" id="tydHead">' +
+    '<span class="dot"></span><span class="name">听译答</span><span class="grow"></span>' +
+    '<button class="ic" id="tydMin" title="收起">×</button>' +
+    '</div>';
 
   const frame = document.createElement('iframe');
-  // display-capture / microphone 必须显式授权，否则抽屉里的录制会被 Permissions Policy 拦掉
+  // display-capture / microphone 必须显式授权，否则卡里的录制会被 Permissions Policy 拦掉
   frame.setAttribute('allow', 'microphone *; display-capture; autoplay; clipboard-read; clipboard-write');
   frame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups');
   frame.src = PANEL_URL;
   panel.appendChild(frame);
+
+  /* ---------- 独立解答窗口 ---------- */
+  const ans = document.createElement('div');
+  ans.className = 'answer';
+  ans.innerHTML =
+    '<div class="head" id="tydAnsHead">' +
+    '<span class="dot"></span><span class="name">解答</span><span class="grow"></span>' +
+    '<button class="ic" id="tydAnsCopy" title="复制解答">⧉</button>' +
+    '<button class="ic" id="tydAnsClose" title="关闭">×</button>' +
+    '</div>' +
+    '<div class="body" id="tydAnsBody"></div>' +
+    '<div class="meta" id="tydAnsMeta"></div>';
 
   const fab = document.createElement('button');
   fab.className = 'fab';
@@ -109,19 +170,92 @@
     '</svg>';
 
   shadow.appendChild(panel);
+  shadow.appendChild(ans);
   shadow.appendChild(fab);
   (document.body || document.documentElement).appendChild(host);
 
+  /* ---------- 拖动 ---------- */
+  function draggable(el, handle) {
+    let sx = 0, sy = 0, ox = 0, oy = 0, moving = false;
+
+    handle.addEventListener('mousedown', (e) => {
+      if (e.target.closest('button')) return;
+      const r = el.getBoundingClientRect();
+      moving = true;
+      sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top;
+      el.style.left = r.left + 'px';
+      el.style.top = r.top + 'px';
+      el.style.right = 'auto';
+      el.style.bottom = 'auto';
+      el.style.transform = 'none';
+      el.classList.add('dragging');
+      e.preventDefault();
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!moving) return;
+      const w = el.offsetWidth;
+      const maxL = Math.max(8, window.innerWidth - w - 8);
+      const maxT = Math.max(8, window.innerHeight - 48);
+      el.style.left = Math.min(maxL, Math.max(8, ox + e.clientX - sx)) + 'px';
+      el.style.top = Math.min(maxT, Math.max(8, oy + e.clientY - sy)) + 'px';
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (!moving) return;
+      moving = false;
+      el.classList.remove('dragging');
+    });
+  }
+
+  draggable(panel, panel.querySelector('#tydHead'));
+  draggable(ans, ans.querySelector('#tydAnsHead'));
+
+  /* ---------- 开关 ---------- */
   let opened = false;
   function toggle(state) {
     opened = state === undefined ? !opened : state;
     panel.classList.toggle('open', opened);
     fab.classList.toggle('hide', opened);
   }
-
   fab.onclick = () => toggle();
+  panel.querySelector('#tydMin').onclick = () => toggle(false);
+  ans.querySelector('#tydAnsClose').onclick = () => ans.classList.remove('open');
 
-  // 状态记忆 + 面板内的「隐藏悬浮球」开关
+  /* ---------- 解答窗口：由卡片里的 iframe 通知 ---------- */
+  const ansBody = ans.querySelector('#tydAnsBody');
+  const ansMeta = ans.querySelector('#tydAnsMeta');
+
+  function showAnswer(text, meta) {
+    if (!text) return;
+    ansBody.textContent = text;
+    ansMeta.textContent = meta || '';
+    if (!ans.dataset.placed) {
+      const r = panel.getBoundingClientRect();
+      const left = opened && r.width ? r.left - 446 : 24;
+      ans.style.left = Math.max(8, left) + 'px';
+      ans.style.top = Math.max(8, opened && r.width ? r.top : 80) + 'px';
+      ans.dataset.placed = '1';
+    }
+    ans.classList.add('open');
+  }
+
+  window.addEventListener('message', (e) => {
+    const d = e.data;
+    if (!d || d.source !== 'tyd-panel') return;
+    if (d.kind === 'answer') showAnswer(d.text, d.meta);
+  });
+
+  ans.querySelector('#tydAnsCopy').onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(ansBody.textContent || '');
+      ansMeta.textContent = '已复制';
+    } catch {
+      ansMeta.textContent = '复制失败，请手动选中';
+    }
+  };
+
+  /* ---------- 显示/隐藏悬浮球 ---------- */
   function applyVisibility(visible) {
     host.style.display = visible ? '' : 'none';
     if (!visible) toggle(false);
@@ -137,12 +271,25 @@
     }
   });
 
-  // Esc 收起
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && opened) toggle(false);
+  // 工具栏图标点按时，后台会让我们把卡片打开
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg && msg.type === 'tyd-toggle-panel') {
+      toggle(true);
+      try { sendResponse({ ok: true }); } catch (e) { /* ignore */ }
+    }
   });
 
-  // 上报"我已在这个页面就位"，侧边栏能看到，形成验证闭环
+  // Esc：先关解答窗口，再关工具卡
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (ans.classList.contains('open')) {
+      ans.classList.remove('open');
+    } else if (opened) {
+      toggle(false);
+    }
+  });
+
+  // 上报“我已在这个页面就位”，侧边栏能看到，形成验证闭环
   try {
     chrome.storage.local.get(['fabPages'], (d) => {
       const pages = d && d.fabPages && typeof d.fabPages === 'object' ? d.fabPages : {};

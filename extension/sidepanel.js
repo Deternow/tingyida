@@ -595,6 +595,16 @@ async function solve() {
       : `输入 ${data.input ? data.input.total_chars : page.length + transcript.length} 字`;
     const who = mode === 'cloud' ? `云端 ${cloudModelName || 'API'}` : '本地 Qwen';
     setMsg(el, `作答完成（${who}，${data.cost}s，${detail}${cut}）`, 'ok');
+
+    // 解答另外弹一个独立窗口（网页里的悬浮入口会接住这条消息；侧边栏模式下没人接，忽略即可）
+    try {
+      window.parent.postMessage({
+        source: 'tyd-panel',
+        kind: 'answer',
+        text: data.answer || '',
+        meta: `${who} · ${data.cost}s · ${detail}`
+      }, '*');
+    } catch (e) { /* ignore */ }
   } catch (e) {
     const message = String(e.message || e).replace(/^做题失败[：: ]*/, '');
     setMsg(el, `做题失败：${message}`, 'err');

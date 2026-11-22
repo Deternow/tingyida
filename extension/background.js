@@ -3,19 +3,28 @@
 
 chrome.runtime.onInstalled.addListener(() => {
   if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
-    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+    // 不再用浏览器侧边栏：点图标改为在页面里弹出浮动卡片
+    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
   }
 });
 
 chrome.runtime.onStartup?.addListener(() => {
   if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
-    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
   }
   restoreCspBypass();
 });
 
-// 兜底：behavior 未生效时手动打开
-chrome.action.onClicked.addListener((tab) => {
+// 点工具栏图标：优先让页面里的悬浮卡打开；页面注入不了（chrome://、商店页等）再退回侧边栏
+chrome.action.onClicked.addListener(async (tab) => {
+  if (tab?.id) {
+    try {
+      await chrome.tabs.sendMessage(tab.id, { type: 'tyd-toggle-panel' });
+      return;
+    } catch (e) {
+      // 内容脚本不在，落到下面的侧边栏兜底
+    }
+  }
   if (chrome.sidePanel?.open && tab?.id) {
     chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
   }
