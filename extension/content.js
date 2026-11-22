@@ -31,14 +31,6 @@
     return r.width < 30 || r.height < 30;
   }
 
-  function isVisible(el) {
-    const s = getComputedStyle(el);
-    if (s.display === 'none' || s.visibility === 'hidden') return false;
-    if (parseFloat(s.opacity || '1') === 0) return false;
-    const r = el.getBoundingClientRect();
-    return r.width > 0 && r.height > 0;
-  }
-
   function englishOnly(t) {
     return String(t || '')
       .replace(/[^\p{Script=Latin}0-9\p{P}\p{Sm}\s]/gu, ' ')
@@ -112,54 +104,143 @@
     return { parent, after: node };
   }
 
-  function hasTranslationAfter(anchor) {
-    let n = anchor.after ? anchor.after.nextSibling : null;
+  // ---------- 页面文本提取：按「块」而不是按文本节点 ----------
+  // 参考会译那类插件的做法：一个段落一个块，覆盖 shadow DOM，
+  // 避免同一句话被行内标签切成碎片、译出来断断续续。
+
+  const TABLE_CELLS = new Set(['TD', 'TH', 'DT', 'DD']);
+  const MAX_BLOCK_CHARS = 1600;
+
+  function cleanText(t) {
+    return String(t || '').replace(/\u200b/g, '').replace(/\s+/g, ' ').trim();
+  }
+
+  // display:contents 的元素自身没有盒子，但子内容照常渲染，不能因为 rect=0 就丢掉
+  function isRendered(el) {
+    if (!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden') return false;
+    if (parseFloat(s.opacity || '1') === 0) return false;
+    if (s.display === 'contents') return true;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }
+
+  function isBlockLike(el) {
+    const d = displayOf(el);
+    return d === 'block' || d === 'flow-root' || d === 'list-item' ||
+           d === 'flex' || d === 'grid' || d === 'table' || d === 'table-row' ||
+           d === 'table-cell' || d === 'table-caption';
+  }
+
+  function skipEl(el) {
+    if (!el || !el.tagName) return true;
+    if (SKIP_TAGS.has(el.tagName)) return true;
+    if (el.isContentEditable) return true;
+    if (el.getAttribute && (el.getAttribute('translate') === 'no' ||
+                            el.getAttribute('aria-hidden') === 'true')) return true;
+    if (el.classList && el.classList.contains('notranslate')) return true;
+    if (el.closest && el.closest('.tyd-tr')) return true;
+    return false;
+  }
+
+  // document + 所有 shadow root（很多文档站/考试系统把正文放在 shadow DOM 里）
+  function eachRoot(fn) {
+    const visit = (root) => {
+      fn(root);
+      const all = root.querySelectorAll ? root.querySelectorAll('*') : [];
+      for (const el of all) if (el.shadowRoot) visit(el.shadowRoot);
+    };
+    visit(document);
+  }
+
+  // 只要子孙里还有“带文本的块级元素”，自己就是容器，交给最内层去翻。
+  // 必须递归：table > tbody > tr > td 里 tbody 的 display 是 table-row-group，
+  // 只查一层会把 <table> 当成叶子，译文就跑到表格外面去了。
+  function hasBlockChildWithText(el) {
+    const walk = (node) => {
+      for (const child of node.children) {
+        if (skipEl(child)) continue;
+        if (isBlockLike(child) && cleanText(child.innerText || child.textContent).length >= 2) return true;
+        if (walk(child)) return true;
+      }
+      return false;
+    };
+    return walk(el);
+  }
+
+  function hasTranslation(el) {
+    if (TABLE_CELLS.has(el.tagName) || el.tagName === 'LI') {
+      for (const c of el.children) {
+        if (c.classList && c.classList.contains('tyd-tr')) return true;
+      }
+      return false;
+    }
+    let n = el.nextSibling;
     while (n && n.nodeType === 3 && !n.nodeValue.trim()) n = n.nextSibling;
     return !!(n && n.nodeType === 1 && n.classList && n.classList.contains('tyd-tr'));
   }
 
   function collect() {
+    const out = [];
+    const seen = new Set();
+
+    eachRoot((root) => {
+      if (out.length >= MAX_TRANSLATE_NODES) return;
+      const all = root.querySelectorAll ? root.querySelectorAll('*') : [];
+      for (const el of all) {
+        if (out.length >= MAX_TRANSLATE_NODES) break;
+        if (skipEl(el) || !isBlockLike(el)) continue;
+        if (hasBlockChildWithText(el)) continue;
+        if (!isRendered(el)) continue;
+        if (hasTranslation(el)) continue;
+
+        const raw = cleanText(el.innerText || el.textContent);
+        if (raw.length < 4 || raw.length > MAX_BLOCK_CHARS) continue;
+
+        const en = englishOnly(raw);
+        if (!hasEnglish(en) || seen.has(en)) continue;
+        seen.add(en);
+        out.push({ el, text: en });
+      }
+    });
+
+    if (!out.length) return collectByTextNode();
+    return out;
+  }
+
+  // 兜底：整页没有块级文本时，退回按文本节点聚合的老做法
+  function collectByTextNode() {
     if (!document.body) return [];
 
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
-        const raw = node.nodeValue || '';
-        const filtered = englishOnly(raw);
-        if (filtered.length < 4) return NodeFilter.FILTER_REJECT;
-        if (!hasEnglish(filtered)) return NodeFilter.FILTER_REJECT;
+        const filtered = englishOnly(node.nodeValue || '');
+        if (filtered.length < 4 || !hasEnglish(filtered)) return NodeFilter.FILTER_REJECT;
         const p = node.parentElement;
-        if (!p) return NodeFilter.FILTER_REJECT;
-        if (SKIP_TAGS.has(p.tagName)) return NodeFilter.FILTER_REJECT;
-        if (p.closest && p.closest('.tyd-tr')) return NodeFilter.FILTER_REJECT;
+        if (!p || skipEl(p)) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }
     });
 
-    // 同一个行内元素（比如一个 <a> 链接）里的多个文本节点会解析到同一个插入点。
-    // 按插入点聚合成一条译文，否则会在同一位置堆出好几个译文块、互相压住。
     const groups = new Map();
     while (walker.nextNode()) {
       const node = walker.currentNode;
-      if (!isVisible(node.parentElement)) continue;
+      if (!node.parentElement || !isRendered(node.parentElement)) continue;
 
       const anchor = resolveAnchor(node);
-      if (!anchor.parent) continue;
-      if (hasTranslationAfter(anchor)) continue; // 已经翻过
+      if (!anchor.parent || hasTranslation(anchor.after)) continue;
 
       let g = groups.get(anchor.after);
       if (!g) {
-        g = { anchor, texts: [] };
+        g = { el: anchor.after, texts: [] };
         groups.set(anchor.after, g);
       }
-      const english = englishOnly(node.nodeValue);
-      if (hasEnglish(english)) g.texts.push(english);
+      g.texts.push(englishOnly(node.nodeValue));
       if (groups.size >= MAX_TRANSLATE_NODES) break;
     }
 
-    return Array.from(groups.values()).map((g) => ({
-      anchor: g.anchor,
-      text: g.texts.join(' ')
-    }));
+    return Array.from(groups.values()).map((g) => ({ el: g.el, text: g.texts.join(' ') }));
   }
 
   // 只为「做题」服务：把本框架的可见文本抽出来交给大模型。
@@ -169,44 +250,48 @@
   function collectText(all) {
     if (!document.body) return { texts: [], chars: 0, truncated: false };
 
-    const clean = all ? (t) => String(t || '').replace(/\s+/g, ' ').trim() : englishOnly;
+    const clean = all ? cleanText : englishOnly;
     const useful = all
       ? (t) => /[A-Za-z\u4e00-\u9fff]/.test(t)
       : hasEnglish;
 
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
-      acceptNode(node) {
-        const text = clean(node.nodeValue || '');
-        if (text.length < (all ? 2 : 4)) return NodeFilter.FILTER_REJECT;
-        if (!useful(text)) return NodeFilter.FILTER_REJECT;
-        const p = node.parentElement;
-        if (!p) return NodeFilter.FILTER_REJECT;
-        if (SKIP_TAGS.has(p.tagName)) return NodeFilter.FILTER_REJECT;
-        // 排除我们自己插入的译文块（里面可能夹着英文术语），避免重复计入
-        if (p.closest && p.closest('.tyd-tr')) return NodeFilter.FILTER_REJECT;
-        return NodeFilter.FILTER_ACCEPT;
-      }
-    });
-
     const out = [];
     let chars = 0;
     let truncated = false;
-    while (walker.nextNode()) {
-      const node = walker.currentNode;
-      if (!node.parentElement || !isVisible(node.parentElement)) continue;
-      const text = clean(node.nodeValue);
-      if (!useful(text)) continue;
-      if (chars + text.length > MAX_SOLVE_CHARS_PER_FRAME) {
-        // 保留本节点能放下的前半段，避免恰好把题目选项整块丢掉
-        const left = MAX_SOLVE_CHARS_PER_FRAME - chars;
-        if (left > 20) out.push(text.slice(0, left));
-        chars = MAX_SOLVE_CHARS_PER_FRAME;
-        truncated = true;
-        break;
+
+    eachRoot((root) => {
+      if (truncated) return;
+      const scope = root === document ? document.body : root;
+      if (!scope) return;
+
+      const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          const text = clean(node.nodeValue || '');
+          if (text.length < (all ? 2 : 4)) return NodeFilter.FILTER_REJECT;
+          if (!useful(text)) return NodeFilter.FILTER_REJECT;
+          const p = node.parentElement;
+          if (!p || skipEl(p)) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      });
+
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (!node.parentElement || !isRendered(node.parentElement)) continue;
+        const text = clean(node.nodeValue);
+        if (!useful(text)) continue;
+        if (chars + text.length > MAX_SOLVE_CHARS_PER_FRAME) {
+          const left = MAX_SOLVE_CHARS_PER_FRAME - chars;
+          if (left > 20) out.push(text.slice(0, left));
+          chars = MAX_SOLVE_CHARS_PER_FRAME;
+          truncated = true;
+          break;
+        }
+        out.push(text);
+        chars += text.length + 1;
       }
-      out.push(text);
-      chars += text.length + 1;
-    }
+    });
+
     return { texts: out, chars, truncated };
   }
 
@@ -224,15 +309,21 @@
     return data.translations || [];
   }
 
-  function insert(anchor, zh) {
-    const span = document.createElement('span');
-    span.className = 'tyd-tr';
-    span.setAttribute('data-tyd', '1');
-    span.textContent = zh;
-    const { parent, after } = anchor;
-    if (!parent) return;
-    if (after.nextSibling) parent.insertBefore(span, after.nextSibling);
-    else parent.appendChild(span);
+  // 译文块插在哪：表格单元格 / 列表项插到内部（插到外面会破坏表格与列表结构），
+  // 其余块级元素插到元素后面，独占一行。
+  function insert(item, zh) {
+    const el = item && item.el;
+    if (!el) return;
+    const box = document.createElement('div');
+    box.className = 'tyd-tr';
+    box.setAttribute('data-tyd', '1');
+    box.textContent = zh;
+
+    if (TABLE_CELLS.has(el.tagName) || el.tagName === 'LI') {
+      el.appendChild(box);
+      return;
+    }
+    if (el.parentNode) el.parentNode.insertBefore(box, el.nextSibling);
   }
 
   async function runTranslate(apiBase) {
@@ -257,7 +348,7 @@
       slice.forEach((item, k) => {
         const zh = (zhs[k] || '').trim();
         if (zh && zh !== item.text) {
-          insert(item.anchor, zh);
+          insert(item, zh);
           done++;
         }
       });
@@ -266,7 +357,9 @@
   }
 
   function clear() {
-    document.querySelectorAll('.tyd-tr').forEach((el) => el.remove());
+    eachRoot((root) => {
+      if (root.querySelectorAll) root.querySelectorAll('.tyd-tr').forEach((el) => el.remove());
+    });
     return { ok: true, top: isTop };
   }
 
