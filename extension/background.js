@@ -260,17 +260,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const cfg = await chrome.storage.local.get(['apiBase', 'solveMode']);
       const apiBase = (cfg.apiBase || 'http://127.0.0.1:8765').replace(/\/$/, '');
       const mode = cfg.solveMode === 'cloud' ? 'cloud' : 'local';
+
+      // 快捷做题：把最近一条已识别的录音文本也带上（历史里最新的一条在最前面）
+      let transcript = '';
+      try {
+        const hist = await fetch(`${apiBase}/api/history`).then((r) => r.json());
+        const latest = (hist.items || []).find((it) => (it.text || '').trim());
+        if (latest) transcript = latest.text;
+      } catch (e) {
+        // 历史取不到就不带录音，不影响纯页面做题
+      }
+
       const resp = await fetch(`${apiBase}/api/${mode === 'cloud' ? 'cloud-solve' : 'solve'}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ page, transcript: '', question: '' }),
+        body: JSON.stringify({ page, transcript, question: '' }),
       });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) {
         sendResponse({ error: data.error || `本地服务返回 ${resp.status}` });
         return;
       }
-      sendResponse({ ...data, mode, page_chars: page.length });
+      sendResponse({ ...data, mode, page_chars: page.length, transcript_chars: transcript.length });
     })().catch((e) => sendResponse({ error: e.message || String(e) }));
     return true;
   }

@@ -226,11 +226,10 @@ class QwenSolver:
 
     @staticmethod
     def fit_input(page_text, transcript, question=None):
-        """按上下文单位裁剪，优先保留录音文本和补充要求。
+        """按上下文单位裁剪：超出预算就只保留前 n 个字符，不再做头尾拼接。
 
-        页面过长时保留开头和结尾：题干常在开头，选项/提问常在末尾，
-        只保留前半段会恰好把答案选项切掉。中文按 4 倍单位计，避免
-        中文长页面把本地 8192 token 的上下文挤爆。
+        录音文本和补充要求优先保留，剩下的预算全部给页面正文。
+        中文按 4 个单位折算，避免中文长页面把本地 8192 token 挤爆。
         """
         page = (page_text or "").strip()
         transcript = (transcript or "").strip()
@@ -240,27 +239,16 @@ class QwenSolver:
         if _units(page) <= page_budget:
             return page, transcript, question, False
 
-        # 二分找「头 65% + 尾 35%」能放下的最长字符数
-        lo, hi, best = 0, len(page), 0
-        while lo <= hi:
-            mid = (lo + hi) // 2
-            head = int(mid * 0.65)
-            tail = mid - head
-            cand = page[:head] + (page[-tail:] if tail else "")
-            if _units(cand) <= page_budget:
-                best = mid
-                lo = mid + 1
-            else:
-                hi = mid - 1
-        best = max(200, min(best, len(page)))
-        head = int(best * 0.65)
-        tail = best - head
-        page = (
-            page[:head]
-            + "\n\n[页面中段因上下文长度限制已省略]\n\n"
-            + (page[-tail:] if tail else "")
-        )
-        return page, transcript, question, True
+        used = 0
+        cut = len(page)
+        for i, ch in enumerate(page):
+            cjk = "\u3400" <= ch <= "\u9fff" or "\uf900" <= ch <= "\ufaff"
+            unit = 4 if cjk else 1
+            if used + unit > page_budget:
+                cut = i
+                break
+            used += unit
+        return page[:max(200, cut)], transcript, question, True
 
     def build_messages(self, page_text, transcript, question=None):
         page, transcript, question, _ = self.fit_input(page_text, transcript, question)

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "听译答 · 语音转写/翻译/做题",
-  "version": "2.5.0",
+  "version": "2.5.2",
   "description": "侧边栏助手：本地 Vosk 语音转写、英文网页离线翻译、本地 Qwen 或云端 API 的 AI 做题",
   "minimum_chrome_version": "119",
   "action": {

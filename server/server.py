@@ -53,6 +53,19 @@ MODELS_DIR = os.path.join(BASE_DIR, "models")
 VOSK_DIR = os.path.join(MODELS_DIR, "vosk")
 
 
+def _clip_head(text, limit):
+    """超出上限就只保留前 limit 个字符（不做头尾拼接）。
+
+    返回 (裁剪后的文本, 是否裁剪过)。
+    """
+    text = text or ""
+    if limit <= 0:
+        return "", bool(text)
+    if len(text) <= limit:
+        return text, False
+    return text[:limit], True
+
+
 def _resolve_vosk(name, legacy):
     """优先工作空间内的模型；没有再回退到旧安装位置，方便平滑迁移。
 
@@ -699,12 +712,18 @@ def api_cloud_solve():
     transcript = str(payload.get("transcript") or "")
     question = str(payload.get("question") or "")
     html = str(payload.get("html") or "")
-    if len(html) > 2_000_000:
-        return jsonify({"error": "页面 HTML 超过 2,000,000 字符上限"}), 413
-    if len(page) + len(transcript) + len(question) > 100_000:
-        return jsonify({"error": "页面文本与补充说明超过 100,000 字符上限"}), 413
     if not page and not transcript and not html:
         return jsonify({"error": "没有可作答的内容"}), 400
+
+    # 超上限不拒绝，按预算裁剪后继续作答（用户宁可要截断后的答案，也不要一个报错）
+    TEXT_LIMIT = 100_000
+    HTML_LIMIT = 2_000_000
+    html, cut_html = _clip_head(html, HTML_LIMIT)
+    transcript, cut_t = _clip_head(transcript, 20_000)
+    question, cut_q = _clip_head(question, 4_000)
+    page_budget = max(2_000, TEXT_LIMIT - len(transcript) - len(question))
+    page, cut_p = _clip_head(page, page_budget)
+    clipped = cut_html or cut_t or cut_q or cut_p
 
     config = read_cloud_config()
     if not config.get("api_key"):
@@ -717,6 +736,7 @@ def api_cloud_solve():
         )
         t0 = time.time()
         answer, truncated = solver.solve(page, transcript, question, html=html)
+        truncated = bool(truncated or clipped)
     except Exception as e:  # noqa: BLE001
         log(f"云端做题失败: {type(e).__name__}")
         return jsonify({"error": "云端调用失败，请检查接口地址、模型支持情况和网络连接"}), 502

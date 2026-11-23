@@ -379,8 +379,10 @@
         if (!r) throw new Error('后台没有响应');
         if (r.error) throw new Error(r.error);
         const who = r.mode === 'cloud' ? '云端' : '本地 Qwen';
-        showAnswer(r.answer || '', `${who} · ${r.cost ?? '?'}s · 页面 ${r.page_chars || 0} 字`);
-        toast('作答完成，见独立解答窗');
+        const cut = (r.input && r.input.truncated) || r.truncated ? '（已按上限截断）' : '';
+        const rec = r.transcript_chars ? ` · 录音 ${r.transcript_chars} 字` : '';
+        showAnswer(r.answer || '', `${who} · ${r.cost ?? '?'}s · 页面 ${r.page_chars || 0} 字${rec}${cut}`);
+        toast('作答完成，见独立解答窗' + (cut ? '（文本已截断）' : ''));
       } catch (err) {
         toast('做题失败：' + (err.message || err), 4200);
       }
