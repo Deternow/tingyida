@@ -89,6 +89,59 @@ async function permState() {
 
 // ---------------------------------------------------------------- 消息路由
 
+// 汇总某个标签页所有框架里的文本；translate / collect-text / solve-page 共用
+function collectTabText(tabId, all = true) {
+  return chrome.webNavigation
+    .getAllFrames({ tabId })
+    .then((frames) =>
+      Promise.all(
+        (frames || [])
+          .filter((f) => !/^(chrome|chrome-extension|chrome-error|edge|devtools|view-source|data):/i.test(f.url || ''))
+          .map(async (f) => {
+            try {
+              const r = await chrome.tabs.sendMessage(
+                tabId,
+                { type: 'tyd-collect-text', all },
+                { frameId: f.frameId }
+              );
+              return r || { texts: [], chars: 0, truncated: false };
+            } catch (e) {
+              return { texts: [], chars: 0, truncated: false };
+            }
+          })
+      )
+    )
+    .then((framesData) => {
+      // Qwen 运行时设为 8192 tokens，关闭 thinking 直接生成答案；
+      // 页面原文总预算约 28000 字符，录音文本由服务端额外优先保留。
+      const MAX_SOLVE_PAGE_CHARS = 28000;
+      const texts = [];
+      const seen = new Set();
+      let collectedChars = 0;
+      let submittedChars = 0;
+      let truncated = framesData.some((x) => x.truncated);
+
+      outer: for (const frame of framesData) {
+        collectedChars += Number(frame.chars || 0);
+        for (const t of frame.texts || []) {
+          const k = (t || '').trim();
+          if (!k || seen.has(k)) continue;
+          seen.add(k);
+          if (submittedChars + k.length > MAX_SOLVE_PAGE_CHARS) {
+            const left = MAX_SOLVE_PAGE_CHARS - submittedChars;
+            if (left > 20) texts.push(k.slice(0, left));
+            submittedChars = MAX_SOLVE_PAGE_CHARS;
+            truncated = true;
+            break outer;
+          }
+          texts.push(k);
+          submittedChars += k.length + 1;
+        }
+      }
+      return { texts, collectedChars, submittedChars, truncated };
+    });
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || msg.target !== 'background') return;
 
@@ -183,59 +236,45 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // 做题：汇总各框架的页面文本（默认含中文）。与 translate-frames 同一套逐框架定向收发，
   // 同样要滤掉浏览器内部框架和我们自己注入的抽屉 iframe。
   if (msg.type === 'collect-text') {
-    const all = msg.all !== false;
-    chrome.webNavigation
-      .getAllFrames({ tabId: msg.tabId })
-      .then((frames) =>
-        Promise.all(
-          (frames || [])
-            .filter((f) => !/^(chrome|chrome-extension|chrome-error|edge|devtools|view-source|data):/i.test(f.url || ''))
-            .map(async (f) => {
-              try {
-                const r = await chrome.tabs.sendMessage(
-                  msg.tabId,
-                  { type: 'tyd-collect-text', all },
-                  { frameId: f.frameId }
-                );
-                return r || { texts: [], chars: 0, truncated: false };
-              } catch {
-                return { texts: [], chars: 0, truncated: false };
-              }
-            })
-        )
-      )
-      .then((framesData) => {
-        // Qwen 运行时设为 8192 tokens，关闭 thinking 直接生成答案；
-        // 页面原文总预算约 28000 字符，录音文本由服务端额外优先保留。
-        const MAX_SOLVE_PAGE_CHARS = 28000;
-        const texts = [];
-        const seen = new Set();
-        let collectedChars = 0;
-        let submittedChars = 0;
-        let truncated = framesData.some((x) => x.truncated);
-
-        outer: for (const frame of framesData) {
-          collectedChars += Number(frame.chars || 0);
-          for (const t of (frame.texts || [])) {
-            const k = (t || '').trim();
-            if (!k || seen.has(k)) continue;
-            seen.add(k);
-            if (submittedChars + k.length > MAX_SOLVE_PAGE_CHARS) {
-              const left = MAX_SOLVE_PAGE_CHARS - submittedChars;
-              if (left > 20) texts.push(k.slice(0, left));
-              submittedChars = MAX_SOLVE_PAGE_CHARS;
-              truncated = true;
-              break outer;
-            }
-            texts.push(k);
-            submittedChars += k.length + 1;
-          }
-        }
-        sendResponse({ texts, collectedChars, submittedChars, truncated });
-      })
+    collectTabText(msg.tabId, msg.all !== false)
+      .then((r) => sendResponse(r))
       .catch((e) => sendResponse({ error: e.message }));
     return true;
   }
+
+  // 页面按钮「做题」：收集文本后直接请求本地服务，结果由网页里的独立解答窗展示
+  if (msg.type === 'solve-page') {
+    (async () => {
+      // 网页悬浮按钮不带 tabId，用消息来源补上
+      const tabId = msg.tabId || (sender && sender.tab && sender.tab.id);
+      if (!tabId) {
+        sendResponse({ error: '拿不到当前标签页' });
+        return;
+      }
+      const r = await collectTabText(tabId, true);
+      const page = (r.texts || []).join('\n').trim();
+      if (!page) {
+        sendResponse({ error: '页面上没有可作答的文字' });
+        return;
+      }
+      const cfg = await chrome.storage.local.get(['apiBase', 'solveMode']);
+      const apiBase = (cfg.apiBase || 'http://127.0.0.1:8765').replace(/\/$/, '');
+      const mode = cfg.solveMode === 'cloud' ? 'cloud' : 'local';
+      const resp = await fetch(`${apiBase}/api/${mode === 'cloud' ? 'cloud-solve' : 'solve'}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ page, transcript: '', question: '' }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        sendResponse({ error: data.error || `本地服务返回 ${resp.status}` });
+        return;
+      }
+      sendResponse({ ...data, mode, page_chars: page.length });
+    })().catch((e) => sendResponse({ error: e.message || String(e) }));
+    return true;
+  }
+
 });
 
 // 快捷键 Ctrl+Shift+Y：同样唤出页面内浮动卡，注入失败才退回侧边栏

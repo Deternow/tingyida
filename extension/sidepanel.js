@@ -20,6 +20,16 @@ let localModelName = '';
 let localReason = '';
 
 let recording = false;
+
+// 把录音状态同步给网页里的悬浮按钮（不在 iframe 里时没人接，忽略即可）
+function reportRecordState() {
+  try {
+    window.parent.postMessage(
+      { source: 'tyd-panel', kind: 'record-state', recording: !!recording },
+      '*'
+    );
+  } catch (e) { /* ignore */ }
+}
 let systemMode = false;   // 音源=整个电脑时走本地服务录制，不弹浏览器窗
 let startedAt = 0;
 let timerId = null;
@@ -253,6 +263,7 @@ async function startRecording() {
   }
 
   recording = true;
+  reportRecordState();
   startedAt = Date.now();
   $('btnStart').disabled = true;
   $('btnStop').disabled = false;
@@ -322,6 +333,7 @@ async function stopRecording(auto = false) {
     startedAt = Date.now() - (st.elapsed || 0) * 1000;
   }
   recording = false;
+  reportRecordState();
   clearInterval(timerId);
   timerId = null;
 
@@ -1063,6 +1075,15 @@ async function init() {
   $('status').onclick = checkStatus;
   $('btnStart').onclick = () => startRecording();
   $('btnStop').onclick = () => stopRecording(true);
+
+  // 网页里的悬浮按钮（launcher）通过 postMessage 控制录音——录音逻辑仍留在本面板，
+  // 这样不用把 getUserMedia / 系统录音那套复制一份到内容脚本里。
+  window.addEventListener('message', (e) => {
+    const d = e.data;
+    if (!d || d.source !== 'tyd-host' || d.kind !== 'record') return;
+    const p = d.action === 'stop' ? stopRecording(true) : startRecording();
+    Promise.resolve(p).finally(reportRecordState);
+  });
   $('btnTranscribe').onclick = () => transcribe();
   $('btnPageTranslate').onclick = translatePage;
   $('btnPageClear').onclick = clearPage;

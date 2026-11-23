@@ -20,27 +20,103 @@
 
   const style = document.createElement('style');
   style.textContent = `
-    .fab {
+    /* ---------- 大按钮 + 悬停展开的四个小按钮 ---------- */
+    .dock {
       position: fixed;
-      right: 10px;
+      right: 12px;
       top: 50%;
       transform: translateY(-50%);
-      width: 44px;
-      height: 44px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      z-index: 2147483645;
+      transition: right .18s ease, opacity .18s;
+    }
+    .dock.hide { right: -80px; opacity: 0; pointer-events: none; }
+
+    .fab {
+      width: 52px;
+      height: 52px;
       border: none;
       border-radius: 50%;
       background: #185fa5;
-      box-shadow: 0 2px 8px rgba(0,0,0,.28);
+      box-shadow: 0 3px 10px rgba(0,0,0,.28);
       cursor: pointer;
-      z-index: 2147483645;
       display: flex;
       align-items: center;
       justify-content: center;
       padding: 0;
-      transition: right .18s ease, opacity .18s;
+      transition: background .15s ease, transform .15s ease;
     }
-    .fab:hover { background: #0c447c; }
-    .fab.hide { right: -60px; opacity: 0; pointer-events: none; }
+    .fab:hover { background: #0c447c; transform: scale(1.04); }
+
+    .acts {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      opacity: 0;
+      transform: translateY(6px);
+      pointer-events: none;
+      transition: opacity .15s ease, transform .15s ease;
+    }
+    .dock:hover .acts, .dock.show-acts .acts {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+
+    .act {
+      width: 36px;
+      height: 36px;
+      border: none;
+      border-radius: 50%;
+      background: #fff;
+      color: #0c447c;
+      box-shadow: 0 1px 5px rgba(10,35,65,.24);
+      font: 600 13px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      transition: background .15s ease, transform .15s ease;
+    }
+    .act:hover { background: #e6f1fb; transform: scale(1.08); }
+    .act[data-act="record"] .rec-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #d94b4b;
+      display: block;
+    }
+    .act[data-act="record"].on .rec-dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 3px;
+      background: #d94b4b;
+    }
+
+    .toast {
+      position: fixed;
+      right: 74px;
+      top: 50%;
+      transform: translateY(-50%);
+      max-width: 260px;
+      padding: 7px 11px;
+      border-radius: 8px;
+      background: rgba(20, 40, 66, .92);
+      color: #fff;
+      font: 12px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      box-shadow: 0 4px 14px rgba(10,35,65,.25);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .18s ease;
+      z-index: 2147483646;
+      white-space: pre-wrap;
+    }
+    .toast.show { opacity: 1; }
 
     /* ---------- 浮动工具卡 ---------- */
     .panel {
@@ -161,17 +237,36 @@
 
   const fab = document.createElement('button');
   fab.className = 'fab';
-  fab.title = '听译答：语音转写 / 翻译 / 做题';
+  fab.title = '听译答：悬停展开 记录 / 翻译 / 做题 / 面板';
   fab.innerHTML =
-    '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" ' +
+    '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" ' +
     'stroke-linecap="round" stroke-linejoin="round">' +
     '<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path>' +
     '<path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line>' +
     '</svg>';
 
+  /* ---------- 悬停展开的四个小按钮 ---------- */
+  const acts = document.createElement('div');
+  acts.className = 'acts';
+  acts.innerHTML = [
+    '<button class="act" data-act="panel" title="打开完整面板">☰</button>',
+    '<button class="act" data-act="solve" title="AI 做题（结果显示在独立解答窗）">答</button>',
+    '<button class="act" data-act="translate" title="翻译本页英文">译</button>',
+    '<button class="act" data-act="record" title="开始记录音频"><span class="rec-dot"></span></button>'
+  ].join('');
+
+  const dock = document.createElement('div');
+  dock.className = 'dock';
+  dock.appendChild(acts);
+  dock.appendChild(fab);
+
+  const toastEl = document.createElement('div');
+  toastEl.className = 'toast';
+
   shadow.appendChild(panel);
   shadow.appendChild(ans);
-  shadow.appendChild(fab);
+  shadow.appendChild(dock);
+  shadow.appendChild(toastEl);
   (document.body || document.documentElement).appendChild(host);
 
   /* ---------- 拖动 ---------- */
@@ -216,11 +311,90 @@
   function toggle(state) {
     opened = state === undefined ? !opened : state;
     panel.classList.toggle('open', opened);
-    fab.classList.toggle('hide', opened);
+    dock.classList.toggle('hide', opened);
   }
   fab.onclick = () => toggle();
   panel.querySelector('#tydMin').onclick = () => toggle(false);
   ans.querySelector('#tydAnsClose').onclick = () => ans.classList.remove('open');
+
+  /* ---------- 悬停按钮组：记录 / 翻译 / 做题 ---------- */
+  let toastTimer = null;
+  function toast(text, ms = 2600) {
+    toastEl.textContent = text;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), Math.max(1200, ms));
+  }
+
+  let recOn = false;
+  const recBtn = acts.querySelector('[data-act="record"]');
+  function paintRec() {
+    recBtn.classList.toggle('on', recOn);
+    recBtn.title = recOn ? '停止记录音频' : '开始记录音频';
+  }
+
+  acts.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.act');
+    if (!btn) return;
+    const act = btn.dataset.act;
+
+    if (act === 'panel') {
+      toggle(true);
+      return;
+    }
+
+    if (act === 'record') {
+      // 录音逻辑在面板 iframe 里，这里只发指令；状态由面板回报
+      try {
+        frame.contentWindow.postMessage(
+          { source: 'tyd-host', kind: 'record', action: recOn ? 'stop' : 'start' },
+          '*'
+        );
+        toast(recOn ? '正在停止录音…' : '正在开始录音…');
+      } catch (err) {
+        toast('面板还没准备好，稍后重试');
+      }
+      return;
+    }
+
+    if (act === 'translate') {
+      toast('正在翻译…', 60000);
+      try {
+        const { apiBase } = await chrome.storage.local.get(['apiBase']);
+        const base = apiBase || 'http://127.0.0.1:8765';
+        const r = await window.__tydRunTranslate(base);
+        if (!r) throw new Error('页面脚本还没就绪，刷新网页后再试');
+        if (r.error) throw new Error(r.error);
+        toast(r.count ? `已翻译 ${r.count} 处` : '页面上没有找到英文文本');
+      } catch (err) {
+        toast('翻译失败：' + (err.message || err), 4200);
+      }
+      return;
+    }
+
+    if (act === 'solve') {
+      toast('正在收集页面文本并作答…', 120000);
+      try {
+        const r = await chrome.runtime.sendMessage({ target: 'background', type: 'solve-page' });
+        if (!r) throw new Error('后台没有响应');
+        if (r.error) throw new Error(r.error);
+        const who = r.mode === 'cloud' ? '云端' : '本地 Qwen';
+        showAnswer(r.answer || '', `${who} · ${r.cost ?? '?'}s · 页面 ${r.page_chars || 0} 字`);
+        toast('作答完成，见独立解答窗');
+      } catch (err) {
+        toast('做题失败：' + (err.message || err), 4200);
+      }
+    }
+  });
+
+  // 面板回报录音状态，按钮图标跟着在「圆点 / 方块」之间切换
+  window.addEventListener('message', (e) => {
+    const d = e.data;
+    if (!d || d.source !== 'tyd-panel' || d.kind !== 'record-state') return;
+    recOn = !!d.recording;
+    paintRec();
+  });
+  paintRec();
 
   /* ---------- 解答窗口：由卡片里的 iframe 通知 ---------- */
   const ansBody = ans.querySelector('#tydAnsBody');
