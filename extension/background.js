@@ -15,16 +15,28 @@ chrome.runtime.onStartup?.addListener(() => {
   restoreCspBypass();
 });
 
-// 点工具栏图标：优先让页面里的悬浮卡打开；页面注入不了（chrome://、商店页等）再退回侧边栏
-chrome.action.onClicked.addListener(async (tab) => {
-  if (tab?.id) {
-    try {
-      await chrome.tabs.sendMessage(tab.id, { type: 'tyd-toggle-panel' });
-      return;
-    } catch (e) {
-      // 内容脚本不在，落到下面的侧边栏兜底
-    }
+// 打开页面内的浮动卡片（会译那种「按钮 + 浮动卡」，不是浏览器侧边栏）
+// 若页面是扩展重载前打开的，内容脚本不在，就现场注入一次 launcher.js 再唤起
+async function openFloatPanel(tab) {
+  if (!tab?.id) return false;
+  try {
+    await chrome.tabs.sendMessage(tab.id, { type: 'tyd-toggle-panel' });
+    return true;
+  } catch (e) {
+    // 内容脚本没就位，下面补注入
   }
+  try {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['launcher.js'] });
+    await chrome.tabs.sendMessage(tab.id, { type: 'tyd-toggle-panel' });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// 点工具栏图标：优先浮动卡；chrome:// / 商店页这类注入不了的页面才退回侧边栏
+chrome.action.onClicked.addListener(async (tab) => {
+  if (await openFloatPanel(tab)) return;
   if (chrome.sidePanel?.open && tab?.id) {
     chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
   }
@@ -226,10 +238,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
-// 快捷键 Ctrl+Shift+Y 唤出侧边栏
+// 快捷键 Ctrl+Shift+Y：同样唤出页面内浮动卡，注入失败才退回侧边栏
 chrome.commands.onCommand.addListener(async (command) => {
   if (command !== 'open-panel') return;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
   if (!tab?.id) return;
+  if (await openFloatPanel(tab)) return;
   chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
 });

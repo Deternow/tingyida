@@ -587,14 +587,18 @@ async function solve() {
       body: JSON.stringify(payload)
     });
 
-    box.hidden = false;
-    box.textContent = data.answer || '（模型没有返回内容）';
+    // 在网页浮动卡里（iframe）时，解答只投到外面的独立窗口，卡片内部不再重复渲染
+    const inCard = window.parent !== window;
+    if (!inCard) {
+      box.hidden = false;
+      box.textContent = data.answer || '（模型没有返回内容）';
+    }
     const cut = data.input && data.input.truncated ? '，文字输入已按上下文预算截断' : '';
     const detail = mode === 'cloud'
       ? `页面 ${data.input?.page_chars || 0} 字 / HTML ${data.input?.html_chars || 0} 字`
       : `输入 ${data.input ? data.input.total_chars : page.length + transcript.length} 字`;
     const who = mode === 'cloud' ? `云端 ${cloudModelName || 'API'}` : '本地 Qwen';
-    setMsg(el, `作答完成（${who}，${data.cost}s，${detail}${cut}）`, 'ok');
+    setMsg(el, `作答完成（${who}，${data.cost}s，${detail}${cut}）${inCard ? '，见右侧解答窗' : ''}`, 'ok');
 
     // 解答另外弹一个独立窗口（网页里的悬浮入口会接住这条消息；侧边栏模式下没人接，忽略即可）
     try {
