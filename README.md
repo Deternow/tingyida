@@ -1,6 +1,6 @@
 # 听译答
 
-**语音转写 · 网页翻译 · AI 做题** —— 一个跑在本机的 Chrome / Edge 侧边栏助手
+**语音转写 · 网页翻译 · AI 做题** —— 一个跑在本机的 Chrome / Edge 浏览助手，以页面浮动卡的形式工作
 
 **English name:** TingYiDa · Speech Transcription, Webpage Translation & AI Quiz Assistant
 
