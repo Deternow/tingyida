@@ -9,7 +9,10 @@ const SAMPLE_RATE = 16000;
 let API = DEFAULT_API;
 let history = [];
 let selectedId = null;
-const solveSelectedIds = new Set();
+// 做题固定使用「最近一次有转写文本的录音」
+function latestTranscriptItem() {
+  return history.find((x) => String(x.text || '').trim()) || null;
+}
 
 // 云端配置状态（只记是否已存密钥与模型名，密钥本身不落到扩展里）
 let cloudConfigured = false;
@@ -560,15 +563,9 @@ async function solve() {
     }
     const pageInfo = await collectPageText(tab.id);
     const page = pageInfo.text;
-    // 优先用面板里选中的那条；没选就用最新一条
-    const selectedItems = history.filter((x) => solveSelectedIds.has(x.id) && String(x.text || '').trim());
-    const solveItems = selectedItems.length
-      ? selectedItems.sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')))
-      : [history.find((x) => x.id === selectedId) || history[0]].filter(Boolean);
-    const transcript = solveItems
-      .map((x) => (x.text || '').trim())
-      .filter(Boolean)
-      .join('\n');
+    // 默认（也是唯一）来源：最近一次已识别出文本的录音
+    const latestRec = latestTranscriptItem();
+    const transcript = latestRec ? String(latestRec.text).trim() : '';
 
     if (!page && !transcript) {
       setMsg(el, '没有内容可作答：当前页面没收集到文本，也没有已识别的录音文本', 'err');
@@ -606,9 +603,10 @@ async function solve() {
       box.textContent = data.answer || '（模型没有返回内容）';
     }
     const cut = data.input && data.input.truncated ? '，文字输入已按上下文预算截断' : '';
-    const detail = mode === 'cloud'
+    const recNote = transcript ? ` · 录音 ${transcript.length} 字` : ' · 无录音';
+    const detail = (mode === 'cloud'
       ? `页面 ${data.input?.page_chars || 0} 字 / HTML ${data.input?.html_chars || 0} 字`
-      : `输入 ${data.input ? data.input.total_chars : page.length + transcript.length} 字`;
+      : `输入 ${data.input ? data.input.total_chars : page.length + transcript.length} 字`) + recNote;
     const who = mode === 'cloud' ? `云端 ${cloudModelName || 'API'}` : '本地 Qwen';
     setMsg(el, `作答完成（${who}，${data.cost}s，${detail}${cut}）${inCard ? '，见右侧解答窗' : ''}`, 'ok');
 
@@ -915,14 +913,26 @@ async function loadHistory() {
   try {
     const d = await api('/api/history');
     history = d.items || [];
-    const availableIds = new Set(history.map((item) => item.id));
-    for (const id of solveSelectedIds) {
-      if (!availableIds.has(id)) solveSelectedIds.delete(id);
-    }
+    // 录音选择已简化为「最近一次」，不再维护多选状态
   } catch (e) {
     history = [];
   }
   $('histCount').textContent = String(history.length);
+  updateSolveRecHint();
+}
+
+function updateSolveRecHint() {
+  const el = $('solveRecHint');
+  if (!el) return;
+  const it = latestTranscriptItem();
+  if (!it) {
+    el.className = 'hint';
+    el.textContent = '暂无已识别录音：本次只用页面文本';
+    return;
+  }
+  const t = String(it.created_at || '').slice(11, 16);
+  el.className = 'hint';
+  el.textContent = `将使用最近一次录音${t ? '（' + t + '）' : ''}：${String(it.text).trim().length} 字`;
 }
 
 function render() {
@@ -940,25 +950,6 @@ function render() {
     const div = document.createElement('div');
     div.className = `item ${it.id === selectedId ? 'active' : ''}`;
     div.onclick = () => { selectedId = it.id; render(); };
-
-    const solvePick = document.createElement('label');
-    solvePick.className = 'solve-pick';
-    solvePick.title = '将此录音识别文本加入做题';
-    solvePick.onclick = (e) => e.stopPropagation();
-    const solveCheck = document.createElement('input');
-    solveCheck.type = 'checkbox';
-    solveCheck.checked = solveSelectedIds.has(it.id);
-    solveCheck.disabled = !String(it.text || '').trim();
-    solveCheck.setAttribute('aria-label', `选择录音 ${history.length - idx} 用于做题`);
-    solveCheck.onclick = (e) => e.stopPropagation();
-    solveCheck.onchange = () => {
-      if (solveCheck.checked) solveSelectedIds.add(it.id);
-      else solveSelectedIds.delete(it.id);
-    };
-    const solveLabel = document.createElement('span');
-    solveLabel.textContent = '用于做题';
-    solvePick.append(solveCheck, solveLabel);
-    div.appendChild(solvePick);
 
     const head = document.createElement('div');
     head.className = 'item-head';
