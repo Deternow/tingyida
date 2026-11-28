@@ -51,19 +51,26 @@
     }
     .fab:hover { background: #0c447c; transform: scale(1.04); }
 
+    /* 绝对定位到大按钮上方：隐藏时不占布局、也不产生可悬停的区域，
+       所以鼠标扫过按钮上方不会把按钮组“带”出来 */
     .acts {
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 50%;
       display: flex;
       flex-direction: column;
       align-items: center;
       gap: 6px;
       opacity: 0;
-      transform: translateY(6px);
+      transform: translate(-50%, 6px);
       pointer-events: none;
       transition: opacity .15s ease, transform .15s ease;
     }
-    .dock:hover .acts, .dock.show-acts .acts {
+    /* 只有 .open 时才显示：.open 由大按钮的 mouseenter 加、离开后延时移除，
+       这样鼠标悬停在按钮上方的空白处不会误触发 */
+    .dock.open .acts {
       opacity: 1;
-      transform: translateY(0);
+      transform: translate(-50%, 0);
       pointer-events: auto;
     }
 
@@ -325,6 +332,23 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toastEl.classList.remove('show'), Math.max(1200, ms));
   }
+
+  // 展开/收起：只在鼠标进入大按钮时展开；离开大按钮或按钮组后延时收起，
+  // 避免鼠标从大按钮移到小按钮的 8px 间隙里被判定为「已离开」而闪烁
+  let hideTimer = null;
+  function openActs() {
+    clearTimeout(hideTimer);
+    dock.classList.add('open');
+  }
+  function closeActsSoon() {
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => dock.classList.remove('open'), 200);
+  }
+  fab.addEventListener('mouseenter', openActs);
+  fab.addEventListener('mouseleave', closeActsSoon);
+  acts.addEventListener('mouseenter', openActs);
+  acts.addEventListener('mouseleave', closeActsSoon);
+  acts.addEventListener('click', openActs);
 
   let recOn = false;
   const recBtn = acts.querySelector('[data-act="record"]');
