@@ -185,8 +185,8 @@
     /* ---------- 独立解答窗口 ---------- */
     .answer {
       position: fixed;
-      width: 430px;
-      max-height: 74vh;
+      width: 344px;
+      max-height: 58vh;
       display: none;
       flex-direction: column;
       background: #fff;
@@ -199,17 +199,19 @@
     }
     .answer.open { display: flex; }
     .answer .body {
-      padding: 10px 12px 12px;
+      padding: 8px 10px 10px;
       overflow: auto;
       white-space: pre-wrap;
       word-break: break-word;
       color: #1f2937;
+      font-size: 12.5px;
+      line-height: 1.6;
     }
     .answer .meta {
       flex: 0 0 auto;
-      padding: 0 12px 8px;
+      padding: 0 10px 7px;
       color: #7b8794;
-      font-size: 11.5px;
+      font-size: 11px;
     }
   `;
   shadow.appendChild(style);
@@ -426,18 +428,57 @@
   const ansBody = ans.querySelector('#tydAnsBody');
   const ansMeta = ans.querySelector('#tydAnsMeta');
 
+  // 解答窗位置记忆：下次打开仍在上一回落下的地方
+  const ANSWER_POS_KEY = 'answerPos';
+  let answerPos = null;
+
+  function applyAnswerPos(left, top) {
+    ans.style.left = left + 'px';
+    ans.style.top = top + 'px';
+    ans.style.right = 'auto';
+    ans.style.bottom = 'auto';
+    ans.style.transform = 'none';
+  }
+
+  function clampAnswerPos(left, top) {
+    const w = ans.offsetWidth || 344;
+    const h = ans.offsetHeight || 240;
+    const maxL = Math.max(8, window.innerWidth - w - 8);
+    const maxT = Math.max(8, window.innerHeight - Math.min(h, window.innerHeight - 16) - 8);
+    return {
+      left: Math.min(maxL, Math.max(8, Math.round(left))),
+      top: Math.min(maxT, Math.max(8, Math.round(top)))
+    };
+  }
+
+  function saveAnswerPos() {
+    if (!ans.classList.contains('open')) return;
+    const r = ans.getBoundingClientRect();
+    if (!r || !r.width) return;
+    answerPos = { left: Math.round(r.left), top: Math.round(r.top) };
+    try {
+      chrome.storage.local.set({ [ANSWER_POS_KEY]: answerPos });
+    } catch (e) { /* ignore */ }
+  }
+
   function showAnswer(text, meta) {
     if (!text) return;
     ansBody.textContent = text;
     ansMeta.textContent = meta || '';
-    if (!ans.dataset.placed) {
+    ans.classList.add('open');   // 先显示，才能量到真实尺寸
+
+    if (answerPos) {
+      const p = clampAnswerPos(answerPos.left, answerPos.top);
+      applyAnswerPos(p.left, p.top);
+    } else if (!ans.dataset.placed) {
       const r = panel.getBoundingClientRect();
-      const left = opened && r.width ? r.left - 446 : 24;
-      ans.style.left = Math.max(8, left) + 'px';
-      ans.style.top = Math.max(8, opened && r.width ? r.top : 80) + 'px';
+      const left = opened && r.width ? r.left - 360 : 24;
+      const top = opened && r.width ? r.top : 80;
+      const p = clampAnswerPos(left, top);
+      applyAnswerPos(p.left, p.top);
       ans.dataset.placed = '1';
+      saveAnswerPos();
     }
-    ans.classList.add('open');
   }
 
   window.addEventListener('message', (e) => {
@@ -445,6 +486,19 @@
     if (!d || d.source !== 'tyd-panel') return;
     if (d.kind === 'answer') showAnswer(d.text, d.meta);
   });
+
+  try {
+    chrome.storage.local.get([ANSWER_POS_KEY], (d) => {
+      const p = d && d[ANSWER_POS_KEY];
+      if (p && typeof p.left === 'number' && typeof p.top === 'number') {
+        answerPos = p;
+        ans.dataset.placed = '1';
+      }
+    });
+  } catch (e) { /* ignore */ }
+
+  // 拖动结束（或任何鼠标松开）后记住位置，下次直接用
+  window.addEventListener('mouseup', saveAnswerPos);
 
   ans.querySelector('#tydAnsCopy').onclick = async () => {
     try {
